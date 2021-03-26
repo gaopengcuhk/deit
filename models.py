@@ -257,18 +257,18 @@ class VisionTransformer(nn.Module):
             for i in range(depth[2])])
         if self.mixture:
            self.blocks4 = nn.ModuleList([
+            Block(
+                dim=embed_dim[3], num_heads=16, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+            for i in range(depth[3])])
+           self.norm = norm_layer(embed_dim[-1])
+        else:
+           self.blocks4 = nn.ModuleList([
             CBlock(
                 dim=embed_dim[3], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[3])])
            self.norm = nn.BatchNorm2d(embed_dim[-1])
-        else:
-           self.blocks4 = nn.ModuleList([
-            Block(
-                dim=embed_dim[3], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
-            for i in range(depth[3])])
-           self.norm = norm_layer(embed_dim[-1]) 
         # Representation layer
         if representation_size:
             self.num_features = representation_size
