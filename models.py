@@ -89,7 +89,7 @@ class Block(nn.Module):
         self.norm1 = nn.BatchNorm2d(dim)
         self.conv1 = nn.Conv2d(dim, dim, 1)
         self.conv2 = nn.Conv2d(dim, dim, 1)
-        self.attn = bb.Conv2d(dim, dim, 7, padding=3, groups=dim)
+        self.attn = nn.Conv2d(dim, dim, 7, padding=3, groups=dim)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = nn.BatchNorm2d(dim)
@@ -97,7 +97,7 @@ class Block(nn.Module):
         self.mlp = CMlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.conv2(self.attn(self.conv1(self.norm1(x)))))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
@@ -202,9 +202,9 @@ class VisionTransformer(nn.Module):
             self.patch_embed2 = PatchEmbed(
                 img_size=img_size // 4, patch_size=2, in_chans=embed_dim[0], embed_dim=embed_dim[1])
             self.patch_embed3 = PatchEmbed(
-                img_size=img_size // 16, patch_size=2, in_chans=embed_dim[1], embed_dim=embed_dim[2])
+                img_size=img_size // 8, patch_size=2, in_chans=embed_dim[1], embed_dim=embed_dim[2])
             self.patch_embed4 = PatchEmbed(
-                img_size=img_size // 32, patch_size=2, in_chans=embed_dim[2], embed_dim=embed_dim[3])
+                img_size=img_size // 16, patch_size=2, in_chans=embed_dim[2], embed_dim=embed_dim[3])
         num_patches1 = self.patch_embed1.num_patches
         num_patches2 = self.patch_embed2.num_patches
         num_patches3 = self.patch_embed3.num_patches
@@ -217,7 +217,7 @@ class VisionTransformer(nn.Module):
         self.pos_embed4 = nn.Parameter(torch.zeros(1, embed_dim[3], int(math.sqrt(num_patches4)), int(math.sqrt(num_patches4))))       
         self.pos_drop = nn.Dropout(p=drop_rate)
 
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depth))]  # stochastic depth decay rule
         self.blocks1 = nn.ModuleList([
             Block(
                 dim=embed_dim[0], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
