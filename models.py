@@ -3,17 +3,17 @@
 import torch
 import torch.nn as nn
 from functools import partial
-
+import math
 from timm.models.vision_transformer import VisionTransformer, _cfg
 from timm.models.registry import register_model
-from timm.models.layers import trunc_normal_，DropPath, to_2tuple
+from timm.models.layers import trunc_normal_, DropPath, to_2tuple
 
 
 __all__ = [
     'deit_tiny_patch16_224', 'deit_small_patch16_224', 'deit_base_patch16_224',
     'deit_tiny_distilled_patch16_224', 'deit_small_distilled_patch16_224',
     'deit_base_distilled_patch16_224', 'deit_base_patch16_384',
-    'deit_base_distilled_patch16_384', ‘depthwise_tiny’, ‘depthwise_small’, 'depthwise_base', 'depthwise_tiny_vit', 'depthwise_small_vit'
+    'deit_base_distilled_patch16_384', 'depthwise_tiny', 'depthwise_small', 'depthwise_base', 'depthwise_tiny_vit', 'depthwise_small_vit'
 ]
 
 class Mlp(nn.Module):
@@ -123,10 +123,7 @@ class PatchEmbed(nn.Module):
         x = self.proj(x)
         return x
     
- class HybridEmbed(nn.Module):
- """ CNN Feature Map Embedding
- Extract feature map from CNN, flatten, project to embedding dim.
- """
+class HybridEmbed(nn.Module):
     def __init__(self, backbone, img_size=224, feature_size=None, in_chans=3, embed_dim=768):
         super().__init__()
         assert isinstance(backbone, nn.Module)
@@ -208,10 +205,10 @@ class VisionTransformer(nn.Module):
                 img_size=img_size // 16, patch_size=2, in_chans=embed_dim[1], embed_dim=embed_dim[2])
             self.patch_embed4 = PatchEmbed(
                 img_size=img_size // 32, patch_size=2, in_chans=embed_dim[2], embed_dim=embed_dim[3])
-        num_patches1 = self.patch_embed.num_patches1
-        num_patches2 = self.patch_embed.num_patches2
-        num_patches3 = self.patch_embed.num_patches3
-        num_patches4 = self.patch_embed.num_patches4
+        num_patches1 = self.patch_embed1.num_patches
+        num_patches2 = self.patch_embed2.num_patches
+        num_patches3 = self.patch_embed3.num_patches
+        num_patches4 = self.patch_embed4.num_patches
 
 #        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed1 = nn.Parameter(torch.zeros(1, embed_dim[0], int(math.sqrt(num_patches1)), int(math.sqrt(num_patches1))))
