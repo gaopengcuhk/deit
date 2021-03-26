@@ -81,7 +81,7 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x
 
-class Block(nn.Module):
+class CBlock(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
@@ -101,6 +101,28 @@ class Block(nn.Module):
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
+class Block(nn.Module):
+
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, sr_ratio=1):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = Attention(
+            dim,
+            num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            attn_drop=attn_drop, proj_drop=drop, sr_ratio=sr_ratio)
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+
+    def forward(self, x, H, W):
+        x = x + self.drop_path(self.attn(self.norm1(x), H, W))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+    
+
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
     """
@@ -216,30 +238,37 @@ class VisionTransformer(nn.Module):
         self.pos_embed3 = nn.Parameter(torch.zeros(1, embed_dim[2], int(math.sqrt(num_patches3)), int(math.sqrt(num_patches3))))
         self.pos_embed4 = nn.Parameter(torch.zeros(1, embed_dim[3], int(math.sqrt(num_patches4)), int(math.sqrt(num_patches4))))       
         self.pos_drop = nn.Dropout(p=drop_rate)
-
+        self.mixture =True
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depth))]  # stochastic depth decay rule
         self.blocks1 = nn.ModuleList([
-            Block(
+            CBlock(
                 dim=embed_dim[0], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[0])])
         self.blocks2 = nn.ModuleList([
-            Block(
+            CBlock(
                 dim=embed_dim[1], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[1])])
         self.blocks3 = nn.ModuleList([
-            Block(
+            CBlock(
                 dim=embed_dim[2], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[2])])
-        self.blocks4 = nn.ModuleList([
+        if self.mixture:
+           self.blocks4 = nn.ModuleList([
+            CBlock(
+                dim=embed_dim[3], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+            for i in range(depth[3])])
+           self.norm = nn.BatchNorm2d(embed_dim[-1])
+        else:
+           self.blocks4 = nn.ModuleList([
             Block(
                 dim=embed_dim[3], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[3])])
-        self.norm = nn.BatchNorm2d(embed_dim[-1])
-
+           self.norm = norm_layer(embed_dim[-1]) 
         # Representation layer
         if representation_size:
             self.num_features = representation_size
@@ -293,6 +322,8 @@ class VisionTransformer(nn.Module):
         for blk in self.blocks3:
             x = blk(x)
         x = self.patch_embed4(x) + self.pos_embed4
+        if self.mixture:
+            x = x.flatten(2).transpose(1, 2)
         for blk in self.blocks4:
             x = blk(x)
         x = self.norm(x)
@@ -301,7 +332,11 @@ class VisionTransformer(nn.Module):
 
     def forward(self, x):
         x = self.forward_features(x)
-        x = self.head(x.flatten(2).mean(-1))
+        if self.mixture:
+           x = x.mean(1)
+        else:
+           x = x.flatten(2).mean(-1)
+        x = self.head(x)
         return x
 
     
