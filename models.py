@@ -122,6 +122,33 @@ class Block(nn.Module):
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
+class SBlock(nn.Module):
+
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, block=-1):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = Attention(
+            dim,
+            num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            attn_drop=attn_drop, proj_drop=drop)
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.block = block
+
+    def forward(self, x):
+#        pdb.set_trace()
+        B, L, C = x.shape
+        if self.block != -1:
+            x = x + self.drop_path(self.attn(self.norm1(x).reshape(-1, self.block, C))).reshape(B, L, C)
+        else:
+            x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+    
 
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
@@ -215,8 +242,10 @@ class ShiftblockTransformer(nn.Module):
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6) 
         embed_dim = [64, 128, 320, 512]
-        heads = [1, 2, 4, 8]
+        num_heads = [1, 2, 4, 8]
         depth = [3, 4, 6, 3]
+        blocks = [64, 16, 4, -1]
+        self.shift = [1, 1, 1, 1]
         if hybrid_backbone is not None:
             self.patch_embed = HybridEmbed(
                 hybrid_backbone, img_size=img_size, in_chans=in_chans, embed_dim=embed_dim)
@@ -235,32 +264,32 @@ class ShiftblockTransformer(nn.Module):
         num_patches4 = self.patch_embed4.num_patches
 
 #        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed1 = nn.Parameter(torch.zeros(1, num_patches1, embed[0]))
-        self.pos_embed2 = nn.Parameter(torch.zeros(1, num_patches2, embed[1]))
-        self.pos_embed3 = nn.Parameter(torch.zeros(1, num_patches3, embed[2]))
-        self.pos_embed4 = nn.Parameter(torch.zeros(1, num_patches4, embed[3]))    
+        self.pos_embed1 = nn.Parameter(torch.zeros(1, num_patches1, embed_dim[0]))
+        self.pos_embed2 = nn.Parameter(torch.zeros(1, num_patches2, embed_dim[1]))
+        self.pos_embed3 = nn.Parameter(torch.zeros(1, num_patches3, embed_dim[2]))
+        self.pos_embed4 = nn.Parameter(torch.zeros(1, num_patches4, embed_dim[3]))    
         self.pos_drop = nn.Dropout(p=drop_rate)
         self.mixture =True
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depth))]  # stochastic depth decay rule
         self.blocks1 = nn.ModuleList([
-            Block(
+            SBlock(
                 dim=embed_dim[0], num_heads=num_heads[0], mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, block=blocks[0])
             for i in range(depth[0])])
         self.blocks2 = nn.ModuleList([
-            Block(
+            SBlock(
                 dim=embed_dim[1], num_heads=num_heads[1], mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, block=blocks[1])
             for i in range(depth[1])])
         self.blocks3 = nn.ModuleList([
-            Block(
+            SBlock(
                 dim=embed_dim[2], num_heads=num_heads[2], mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, block=blocks[2])
             for i in range(depth[2])])
         self.blocks4 = nn.ModuleList([
-            Block(
+            SBlock(
                 dim=embed_dim[3], num_heads=num_heads[3], mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, block=blocks[3])
             for i in range(depth[3])])
         self.norm = norm_layer(embed_dim[-1])
         # Representation layer
@@ -326,6 +355,7 @@ class ShiftblockTransformer(nn.Module):
         x = x + self.pos_embed3
         for blk in self.blocks3:
             x = blk(x)
+        x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         x = self.patch_embed4(x)
         B, C, H, W = x.shape
         x = x.flatten(2).transpose(1, 2)
