@@ -89,7 +89,7 @@ class CBlock(nn.Module):
         self.norm1 = nn.BatchNorm2d(dim)
         self.conv1 = nn.Conv2d(dim, dim, 1)
         self.conv2 = nn.Conv2d(dim, dim, 1)
-        self.attn = nn.Conv2d(dim, dim, 7, padding=3, groups=dim)
+        self.attn = nn.Conv2d(dim, dim, 5, padding=2, groups=dim)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = nn.BatchNorm2d(dim)
@@ -405,7 +405,7 @@ class VisionTransformer(nn.Module):
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6) 
         embed_dim = [64, 128, 320, 512]
-        depth = [3, 4, 6, 3]
+        depth = [3, 4, 8, 3]
         if hybrid_backbone is not None:
             self.patch_embed = HybridEmbed(
                 hybrid_backbone, img_size=img_size, in_chans=in_chans, embed_dim=embed_dim)
