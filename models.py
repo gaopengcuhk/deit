@@ -94,6 +94,7 @@ class Attention_pure(nn.Module):
 
     def forward(self, x):
         B, N, C = x.shape
+        C = int(C // 3)
         qkv = x.reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
 
@@ -627,6 +628,7 @@ class MixVisionTransformer(nn.Module):
         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6) 
         embed_dim = [64, 128, 320, 512]
         depth = [3, 4, 8, 3]
+        num_heads = [1, 2, 5, 8]
         if hybrid_backbone is not None:
             self.patch_embed = HybridEmbed(
                 hybrid_backbone, img_size=img_size, in_chans=in_chans, embed_dim=embed_dim)
@@ -654,17 +656,17 @@ class MixVisionTransformer(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depth))]  # stochastic depth decay rule
         self.blocks1 = nn.ModuleList([
             MixBlock(
-                dim=embed_dim[0], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim[0], num_heads=num_heads[0], mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[0])])
         self.blocks2 = nn.ModuleList([
             MixBlock(
-                dim=embed_dim[1], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim[1], num_heads=num_heads[1], mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[1])])
         self.blocks3 = nn.ModuleList([
             MixBlock(
-                dim=embed_dim[2], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim[2], num_heads=num_heads[2], mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[2])])
         if self.mixture:
@@ -677,7 +679,7 @@ class MixVisionTransformer(nn.Module):
         else:
            self.blocks4 = nn.ModuleList([
             MixBlock(
-                dim=embed_dim[3], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim[3], num_heads=num_heads[3], mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[3])])
            self.norm = nn.BatchNorm2d(embed_dim[-1])
