@@ -124,6 +124,9 @@ class MixBlock(nn.Module):
         self.norm2 = nn.BatchNorm2d(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = CMlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.sa_weight = nn.Parameter(torch.Tensor([0.5]))
+        self.conv_weight = nn.Parameter(torch.Tensor([0.5]))
+
 
     def forward(self, x):
         B, _, H, W = x.shape
@@ -138,7 +141,7 @@ class MixBlock(nn.Module):
         sa = self.attn(sa)
         sa = sa.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         
-        x = x + self.drop_path(self.conv2(sa + conv))
+        x = x + self.drop_path(self.conv2(self.sa_weight* sa + self.conv_weight * conv))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
