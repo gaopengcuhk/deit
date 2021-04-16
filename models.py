@@ -105,6 +105,29 @@ class Attention_pure(nn.Module):
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj_drop(x)
         return x
+    
+class Attention_inifinity(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
+        self.scale = qk_scale or head_dim ** -0.5
+
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x):
+        B, N, C = x.shape
+        v = x.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj_drop(x)
+        return x
 
 class MixBlock(nn.Module):
 
@@ -146,6 +169,58 @@ class MixBlock(nn.Module):
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
+class InfinityBlock(nn.Module):
+
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.dim = dim
+        self.norm1 = nn.BatchNorm2d(dim)
+        self.conv1 = nn.Conv2d(dim, dim, 1)
+        self.conv2 = nn.Conv2d(dim, dim, 1)
+        self.conv = nn.Conv2d(dim, dim, 5, padding=2, groups=dim)
+        self.gaussian_offset_generator = nn.Conv2d(dim, 2)
+        self.attn = Attention_inifinity(
+            dim,
+            num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            attn_drop=attn_drop, proj_drop=drop)
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = nn.BatchNorm2d(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = CMlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.sa_weight = nn.Parameter(torch.Tensor([0.5]))
+        self.conv_weight = nn.Parameter(torch.Tensor([0.5]))
+
+
+    def forward(self, x):
+        B, _, H, W = x.shape
+        residual = x
+        x = self.norm1(x)
+        qkv = self.conv1(x)
+        offset = self.gaussian_offset_generator(x).sigmoid()
+        offset[:, 0, :, :] = offset[:, 0, :, :] * H
+        offset[:, 1, :, :] = offset[:, 1, :, :] * W
+        grid_y, grid_x = torch.meshgrid(torch.arange(0, H), torch.arange(0, W))
+        grid = torch.stack((grid_x, grid_y), 2).float()
+        grid.requires_grad = False
+        grid = grid.type_as(src)
+        grid = grid.unsqueeze(0).permute(0, 3, 1, 2).flatten(2).permute(2, 0, 1)
+        
+        
+        conv = self.conv(qkv)
+        
+        sa = qkv.flatten(2).transpose(1, 2)
+        sa = self.attn(sa)
+        sa = sa.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        
+        x = x + self.drop_path(self.conv2(self.sa_weight* sa + self.conv_weight * conv))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+    
+    
+
 class CBlock(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
