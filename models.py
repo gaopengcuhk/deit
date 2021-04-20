@@ -588,14 +588,14 @@ class VisionTransformer(nn.Module):
             for i in range(depth[2])])
         if self.mixture:
            self.blocks4 = nn.ModuleList([
-            Block(
+            MixBlock(
                 dim=embed_dim[3], num_heads=16, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[3])])
-           self.norm = norm_layer(embed_dim[-1])
+           self.norm = nn.BatchNorm2d(embed_dim[-1])
         else:
            self.blocks4 = nn.ModuleList([
-            CBlock(
+            MixBlock(
                 dim=embed_dim[3], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[3])])
@@ -653,8 +653,8 @@ class VisionTransformer(nn.Module):
         for blk in self.blocks3:
             x = blk(x)
         x = self.patch_embed4(x) + self.pos_embed4
-        if self.mixture:
-            x = x.flatten(2).transpose(1, 2)
+#        if self.mixture:
+#            x = x.flatten(2).transpose(1, 2)
         for blk in self.blocks4:
             x = blk(x)
         x = self.norm(x)
@@ -663,10 +663,10 @@ class VisionTransformer(nn.Module):
 
     def forward(self, x):
         x = self.forward_features(x)
-        if self.mixture:
-           x = x.mean(1)
-        else:
-           x = x.flatten(2).mean(-1)
+#        if self.mixture:
+#           x = x.mean(1)
+#        else:
+        x = x.flatten(2).mean(-1)
         x = self.head(x)
         return x
 
