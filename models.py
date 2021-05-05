@@ -131,12 +131,12 @@ class Attention_inifinity(nn.Module):
     
 class Mix(nn.Module):
 
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+    def __init__(self, dim, y_dim, num_heads, mlp_ratio=4., y_mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
-        self.norm1 = norm_layer(dim)
-        self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        self.norm1 = norm_layer(y_dim)
+        y_mlp_hidden_dim = int(y_dim / y_mlp_ratio)
+        self.channel_mlp = Mlp(in_features=y_dim, hidden_features=y_mlp_hidden_dim, act_layer=act_layer, drop=drop)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -144,7 +144,7 @@ class Mix(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.channel_mlp(self.norm1(x)))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
@@ -622,8 +622,8 @@ class MLP_Mixer(nn.Module):
         self.head = nn.Linear(embed_dim[-1], num_classes) if num_classes > 0 else nn.Identity()
         self.norm1 = norm_layer(embed_dim[0])
         self.norm2 = norm_layer(embed_dim[1])
-        self.norm2 = norm_layer(embed_dim[2])
-        self.norm3 = norm_layer(embed_dim[3])
+        self.norm3 = norm_layer(embed_dim[2])
+        self.norm4 = norm_layer(embed_dim[3])
         self.norm = norm_layer(embed_dim[3])
         trunc_normal_(self.pos_embed1, std=.02)
         trunc_normal_(self.pos_embed2, std=.02)
@@ -654,17 +654,27 @@ class MLP_Mixer(nn.Module):
 
     def forward_features(self, x):
         B = x.shape[0]
-        x = self.norm1(self.patch_embed1(x).flatten(2).transpose(1, 2)) + self.pos_embed1
+        x = self.patch_embed1(x)
+        B, C, H, W = x.shape
+        x = self.norm1(x.flatten(2).transpose(1, 2)) + self.pos_embed1
         x = self.pos_drop(x)
         for blk in self.blocks1:
             x = blk(x)
-        x = self.norm2(self.patch_embed2(x).flatten(2).transpose(1, 2)) + self.pos_embed2
+        x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        x = self.patch_embed2(x)
+        B, C, H, W = x.shape
+        x = self.norm2(x.flatten(2).transpose(1, 2)) + self.pos_embed2
         for blk in self.blocks2:
             x = blk(x)
+        x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        x = self.patch_embed3(x)
+        B, C, H, W = x.shape
         x = self.norm3(self.patch_embed3(x).flatten(2).transpose(1, 2)) + self.pos_embed3
         for blk in self.blocks3:
             x = blk(x)
-        x = self.norm4(self.patch_embed4(x).flatten(2).transpose(1, 2)) + self.pos_embed4
+        x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        x = self.patch_embed4(x)
+        x = self.norm4(x.flatten(2).transpose(1, 2)) + self.pos_embed4
         for blk in self.blocks4:
             x = blk(x)
         x = self.norm(x)
