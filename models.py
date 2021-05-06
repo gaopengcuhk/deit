@@ -144,7 +144,7 @@ class Mix(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
-        x = x + self.drop_path(self.channel_mlp(self.norm1(x)))
+        x = x + self.drop_path(self.channel_mlp(self.norm1(x.transpose(1, 2).contiguous())).transpose(1, 2).contiguous())
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
@@ -590,22 +590,22 @@ class MLP_Mixer(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depth))]  # stochastic depth decay rule
         self.blocks1 = nn.ModuleList([
             Mix(
-                dim=embed_dim[0], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim[0], y_dim=num_patches1, num_heads=num_heads, mlp_ratio=mlp_ratio, y_mlp_ratio=4.0, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[0])])
         self.blocks2 = nn.ModuleList([
             Mix(
-                dim=embed_dim[1], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim[1], y_dim=num_patches2, num_heads=num_heads, mlp_ratio=mlp_ratio, y_mlp_ratio=2.0, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[1])])
         self.blocks3 = nn.ModuleList([
             Mix(
-                dim=embed_dim[2], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim[2], y_dim=num_patches3, num_heads=num_heads, mlp_ratio=mlp_ratio, y_mlp_ratio=1.0, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[2])])
         self.blocks4 = nn.ModuleList([
             Mix(
-                dim=embed_dim[3], num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                dim=embed_dim[3], y_dim=num_patches4, num_heads=num_heads, mlp_ratio=mlp_ratio, y_mlp_ratio=0.5, qkv_bias=qkv_bias, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth[3])])
         # Representation layer
@@ -669,7 +669,7 @@ class MLP_Mixer(nn.Module):
         x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         x = self.patch_embed3(x)
         B, C, H, W = x.shape
-        x = self.norm3(self.patch_embed3(x).flatten(2).transpose(1, 2)) + self.pos_embed3
+        x = self.norm3(x.flatten(2).transpose(1, 2)) + self.pos_embed3
         for blk in self.blocks3:
             x = blk(x)
         x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
