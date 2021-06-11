@@ -105,6 +105,36 @@ class Attention_pure(nn.Module):
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj_drop(x)
         return x
+
+class relative_attention(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.neighbour = 5
+        self.scale = qk_scale or head_dim ** -0.5
+        self.relative_embedding = nn.Parameter(torch.zeros(1, self.neighbour ** 2, dim ))
+        trunc_normal_(self.relative_embedding, std=0.02)
+
+    def forward(self, x):
+#        pdb.set_trace()
+        B, C, H, W = x.shape
+        value = F.unfold(x, self.neighbour, 1, self.neighbour // 2).reshape(B, C, self.neighbour ** 2, H * W).permute(0, 3, 2, 1).reshape(-1, self.neighbour ** 2, C)
+        key = self.relative_embedding.repeat(B * H * W, 1, 1)
+        query = x.flatten(2).permute(0, 2, 1).reshape(-1, C).unsqueeze(1)
+
+        value = value.reshape(B * H * W, self.neighbour ** 2 , 1, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)[0]
+        key = key.reshape(B * H * W, self.neighbour ** 2 , 1, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)[0]
+        query = query.reshape(B * H * W, 1 , 1, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)[0]
+        attn = (query @ key.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        update = (attn @ value).transpose(1, 2).reshape(B * H * W, 1, C)
+        x = update.reshape(B, H * W, C).permute(0, 2, 1).reshape(B, C, H, W)
+        
+        return x
+
+
+    
     
 class Attention_inifinity(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
